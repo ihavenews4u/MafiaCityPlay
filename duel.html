@@ -50,7 +50,9 @@ label.field{display:block;margin-bottom:10px}
 .scheme .sm{fill:var(--smoke);opacity:.45}
 .scheme .steps{font-family:var(--mono);font-size:12px;fill:var(--fg)}
 /* turn controls */
-.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.turnGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
+.vcol{display:grid;gap:6px}
+.col{min-width:0}
 .dir{border:1px solid var(--line);background:transparent;color:var(--fg);border-radius:8px;padding:14px 6px;font:inherit;font-weight:500;cursor:pointer}
 .dir[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 .dir.move[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
@@ -98,23 +100,27 @@ label.field{display:block;margin-bottom:10px}
 
 <section class="card" id="turn" hidden>
   <h2 id="turnTitle">Ход 1</h2>
-  <div id="pistolMode" class="row" hidden style="margin-bottom:10px">
-    <button class="opt" id="pmSplit" aria-pressed="true">Разнос<small>2 выстрела в 2 позиции</small></button>
-    <button class="opt" id="pmFocus" aria-pressed="false">В точку<small>оба в одну, урон ×2,5</small></button>
-  </div>
-  <div class="hint" style="margin:0 0 6px">Куда стрелять</div>
-  <div class="grid3" id="shootBtns">
-    <button class="dir shoot" data-d="L">← Влево</button>
-    <button class="dir shoot" data-d="C">В центр</button>
-    <button class="dir shoot" data-d="R">Вправо →</button>
+  <div class="turnGrid">
+    <div class="col"><div class="hint" id="h1">Куда стрелять</div>
+      <div class="vcol">
+        <button class="dir shoot" data-hand="1" data-d="L">▲ Влево</button>
+        <button class="dir shoot" data-hand="1" data-d="C">В центр</button>
+        <button class="dir shoot" data-hand="1" data-d="R">▼ Вправо</button>
+      </div></div>
+    <div class="col" id="hand2" hidden><div class="hint">Правая рука</div>
+      <div class="vcol">
+        <button class="dir shoot" data-hand="2" data-d="L">▲ Влево</button>
+        <button class="dir shoot" data-hand="2" data-d="C">В центр</button>
+        <button class="dir shoot" data-hand="2" data-d="R">▼ Вправо</button>
+      </div></div>
+    <div class="col"><div class="hint">Куда сдвинуться</div>
+      <div class="vcol">
+        <button class="dir move" data-m="L">▲ Влево</button>
+        <button class="dir move" data-m="C" aria-pressed="true">Остаться</button>
+        <button class="dir move" data-m="R">▼ Вправо</button>
+      </div></div>
   </div>
   <p class="hint" id="shootHint"></p>
-  <div class="hint" style="margin:12px 0 6px">Куда сдвинуться</div>
-  <div class="grid3">
-    <button class="dir move" data-m="L">← Влево</button>
-    <button class="dir move" data-m="C" aria-pressed="true">Остаться</button>
-    <button class="dir move" data-m="R">Вправо →</button>
-  </div>
   <div class="extra">
     <button class="opt" id="approach">Подойти <small>+50 м ближе</small></button>
     <button class="opt" id="smoke">Дым <small>вместо выстрела, 2 хода</small></button>
@@ -144,7 +150,7 @@ const DIRS = {L:"влево", C:"в центр", R:"вправо"}, MOVES = {L:"
 const $ = id => document.getElementById(id);
 let sel = {w:"auto", b:"shotgun", p:"street"};
 let S = null; // battle state
-let choice = {shoot:[], move:"C", approach:false, smoke:false, pmode:"split"};
+let choice = {hands:{}, move:"C", approach:false, smoke:false};
 let score = {w:0, l:0};
 try { const s = JSON.parse(localStorage.getItem("mc_score")||"null"); if (s) score = s; } catch(e){}
 
@@ -176,7 +182,7 @@ function start(){
   $("setup").hidden = true; $("arena").hidden = false; $("turn").hidden = false; $("logCard").hidden = false;
   $("log").innerHTML = ""; $("result").hidden = true; $("again").hidden = true;
   $("meW").textContent = S.me.w.name; $("botW").textContent = S.bot.w.name; if (BOT_NAME) document.querySelector(".fighter.bot .name").textContent = BOT_NAME;
-  $("pistolMode").hidden = !S.me.w.pair;
+  $("hand2").hidden = !S.me.w.pair; $("h1").textContent = S.me.w.pair ? "Левая рука" : "Куда стрелять";
   logT(`${PLACES[sel.p].name}, старт ${S.dist} м`);
   resetChoice(); render();
 }
@@ -185,7 +191,8 @@ if (BOT_ID) start();
 $("again").onclick = () => { $("setup").hidden=false; $("arena").hidden=true; $("turn").hidden=true; $("logCard").hidden=true; showScore(); };
 
 function canShoot(f, d){ return d <= f.w.rng && d >= f.w.min; }
-function resetChoice(){ choice = {shoot:[], move:"C", approach:false, smoke:false, pmode:choice.pmode}; }
+function resetChoice(){ choice = {hands:{}, move:"C", approach:false, smoke:false}; }
+function myShots(){ if (S.me.w.pair) return [choice.hands[1],choice.hands[2]].filter(Boolean); return choice.hands[1]?[choice.hands[1]]:[]; }
 
 function render(){
   $("dist").textContent = S.dist;
@@ -201,12 +208,11 @@ function render(){
   }
   $("turnTitle").textContent = "Ход "+S.turn;
   const me = S.me, shootable = canShoot(me, S.dist) && !choice.smoke;
-  document.querySelectorAll(".shoot").forEach(b=>{ b.disabled = !shootable; b.setAttribute("aria-pressed", String(choice.shoot.includes(b.dataset.d))); });
-  $("shootHint").textContent = choice.smoke ? "Этот ход — дымовая граната, выстрела нет." : !canShoot(me,S.dist) ? (S.dist>me.w.rng ? `Противник дальше ${me.w.rng} м — нужно подойти.` : `Ближе ${me.w.min} м ваше оружие не стреляет.`) : me.w.pair ? (choice.pmode==="split" ? "Выберите две позиции." : "Выберите одну позицию.") : "Угадали, куда сдвинется бот — попали.";
+  document.querySelectorAll(".shoot").forEach(b=>{ b.disabled = !shootable; b.setAttribute("aria-pressed", String(choice.hands[b.dataset.hand]===b.dataset.d)); });
+  $("shootHint").textContent = choice.smoke ? "Этот ход — дымовая граната, выстрела нет." : !canShoot(me,S.dist) ? (S.dist>me.w.rng ? `Противник дальше ${me.w.rng} м — нужно подойти.` : `Ближе ${me.w.min} м ваше оружие не стреляет.`) : me.w.pair ? "Каждая рука стреляет в свою позицию. Обе в одну — урон ×2,5." : "Угадали, куда сдвинется бот — попали.";
   document.querySelectorAll(".move").forEach(b=>b.setAttribute("aria-pressed", String(choice.move===b.dataset.m)));
   $("approach").classList.toggle("on", choice.approach); $("approach").disabled = S.dist<=0;
   $("smoke").classList.toggle("on", choice.smoke); $("smoke").disabled = !me.smokeLeft;
-  $("pmSplit").setAttribute("aria-pressed", String(choice.pmode==="split")); $("pmFocus").setAttribute("aria-pressed", String(choice.pmode==="focus"));
   $("turn").hidden = S.over;
   drawScheme();
 }
@@ -236,20 +242,17 @@ function drawScheme(){
   <p class="hint">Светлая полоса слева — куда достаёте вы, справа — куда достаёт бот. Дорожки: лево / центр / право, кружок стоит там, куда боец сдвинулся на прошлом ходу.</p>`;
 }
 document.querySelectorAll(".shoot").forEach(b=>b.onclick=()=>{
-  const d=b.dataset.d, max = (S.me.w.pair && choice.pmode==="split") ? 2 : 1;
-  if (choice.shoot.includes(d)) choice.shoot = choice.shoot.filter(x=>x!==d);
-  else { choice.shoot.push(d); while (choice.shoot.length>max) choice.shoot.shift(); }
+  const h=b.dataset.hand, d=b.dataset.d;
+  choice.hands[h] = (choice.hands[h]===d) ? undefined : d;
   render();
 });
 document.querySelectorAll(".move").forEach(b=>b.onclick=()=>{ choice.move=b.dataset.m; render(); });
 $("approach").onclick=()=>{ choice.approach=!choice.approach; render(); };
-$("smoke").onclick=()=>{ choice.smoke=!choice.smoke; if (choice.smoke) choice.shoot=[]; render(); };
-$("pmSplit").onclick=()=>{ choice.pmode="split"; choice.shoot=[]; render(); };
-$("pmFocus").onclick=()=>{ choice.pmode="focus"; choice.shoot=[]; render(); };
+$("smoke").onclick=()=>{ choice.smoke=!choice.smoke; if (choice.smoke) choice.hands={}; render(); };
 
 // --- bot brain: simple but not stupid
 function botPlan(){
-  const b=S.bot, m=S.me, plan={shoot:[], move:["L","C","R"][Math.floor(Math.random()*3)], approach:false, smoke:false, pmode:"split"};
+  const b=S.bot, m=S.me, plan={shoot:[], move:["L","C","R"][Math.floor(Math.random()*3)], approach:false, smoke:false};
   if (!canShoot(b,S.dist)){
     if (S.dist>b.w.rng){
       plan.approach = true;
@@ -257,9 +260,8 @@ function botPlan(){
     }
     return plan;
   }
-  if (b.w.pair){ plan.pmode = Math.random()<.5?"split":"focus"; }
-  const dirs=["L","C","R"].sort(()=>Math.random()-.5);
-  plan.shoot = (b.w.pair && plan.pmode==="split") ? dirs.slice(0,2) : dirs.slice(0,1);
+  const rnd=()=>["L","C","R"][Math.floor(Math.random()*3)];
+  plan.shoot = b.w.pair ? [rnd(), rnd()] : [rnd()];
   if (S.dist > m.w.rng && b.w.rng >= S.dist) plan.approach=false; // bot has the range edge: hold it
   else if (S.dist > b.w.rng) plan.approach=true;
   return plan;
@@ -274,10 +276,10 @@ function fire(shooter, target, plan, targetMove){
     const hitAny = plan.shoot.includes(targetMove);
     if (hitAny && Math.random()<vis){
       guessed=true;
-      const mult = plan.pmode==="focus" ? w.focusMult : 1;
-      dmg = Math.round(bullet()*mult);
+      const focus = plan.shoot.length===2 && plan.shoot[0]===plan.shoot[1];
+      dmg = Math.round(bullet()*(focus?w.focusMult:1));
     }
-    return {dmg, guessed, crits, hitBullets, mode:plan.pmode};
+    return {dmg, guessed, crits, hitBullets};
   }
   guessed = plan.shoot[0]===targetMove;
   if (guessed){ if (Math.random()<vis) for(let i=0;i<w.bullets;i++) dmg+=bullet(); else guessed="blind"; }
@@ -288,8 +290,9 @@ function lineText(who, r, plan, moveKey, approach, tgt){
   const parts = [];
   if (plan.smoke) parts.push(`бросает дым (${tgt} не виден 2 хода)`);
   else if (plan.shoot.length){
-    const where = plan.shoot.map(d=>DIRS[d]).join(" и ");
-    let s = `стреляет ${where}${plan.pmode==="focus"?" в точку":""} — `;
+    const focus = plan.shoot.length===2 && plan.shoot[0]===plan.shoot[1];
+    const where = focus ? DIRS[plan.shoot[0]]+" с двух рук" : plan.shoot.map(d=>DIRS[d]).join(" и ");
+    let s = `стреляет ${where} — `;
     if (r.guessed==="blind") s += "угадал, но цель в дыму, промах";
     else if (r.guessed) s += `угадал, −${r.dmg}`;
     else s += r.dmg>0 ? `не угадал, задел ${r.hitBullets} пул., −${r.dmg}` : "промах";
@@ -304,8 +307,8 @@ $("go").onclick = () => {
   if (S.over) return;
   const me=S.me, bot=S.bot;
   if (!choice.smoke && canShoot(me,S.dist)){
-    const need = (me.w.pair && choice.pmode==="split") ? 2 : 1;
-    if (choice.shoot.length<need){ $("shootHint").textContent = need===2 ? "Выберите две позиции для выстрела." : "Выберите, куда стрелять."; return; }
+    const need = me.w.pair ? 2 : 1;
+    if (myShots().length<need){ $("shootHint").textContent = need===2 ? "Выберите позицию для каждой руки." : "Выберите, куда стрелять."; return; }
   }
   const bp = botPlan();
   logT(`Ход ${S.turn} · дистанция ${S.dist} м`);
@@ -313,7 +316,7 @@ $("go").onclick = () => {
   if (choice.smoke && me.smokeLeft){ me.smokeLeft=0; me.smokeTurns=SMOKE_TURNS; }
   if (bp.smoke && bot.smokeLeft){ bot.smokeLeft=0; bot.smokeTurns=SMOKE_TURNS; }
   // shots (simultaneous)
-  const myPlan = {shoot: choice.smoke?[]:choice.shoot, pmode:choice.pmode, smoke:choice.smoke};
+  const myPlan = {shoot: choice.smoke?[]:myShots(), smoke:choice.smoke};
   const rMe = (myPlan.shoot.length && canShoot(me,S.dist)) ? fire(me, bot, myPlan, bp.move) : {dmg:0,guessed:false,crits:0,hitBullets:0};
   const rBot = (bp.shoot.length && canShoot(bot,S.dist)) ? fire(bot, me, bp, choice.move) : {dmg:0,guessed:false,crits:0,hitBullets:0};
   log(`<span class="me">${lineText("Вы", rMe, myPlan, choice.move, choice.approach, "бот")}</span>`);
