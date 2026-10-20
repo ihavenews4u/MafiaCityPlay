@@ -1,0 +1,16 @@
+
+/* Layout: one column, phone-first. Setup card → arena (distance strip, two fighters) → turn controls → log. */
+:root{
+  --bg:#f1efe8; --panel:#ffffff; --fg:#1b1a17; --muted:#6b675c; --line:#d8d4c8;
+  --accent:#b23a1e; --accent-fg:#ffffff; --enemy:#2d5f8a; --good:#2f7a3d; --warn:#b7861a;
+  --smoke:#8a8a8a;
+  --display:"Oswald","Arial Narrow",sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#15171a; --panel:#1f2226; --fg:#ecebe6; --muted:#9a9890; --line:#34393f;
+  --accent:#e0593a; --accent-fg:#15171a; --enemy:#5e9bd1; --good:#5fb56f; --warn:#d9a83a; --smoke:#6a6f76; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#15171a; --panel:#1f2226; --fg:#ecebe6; --muted:#9a9890; --line:#34393f;
+  --accent:#e0593a; --accent-fg:#15171a; --enemy:#5e9bd1; --good:#5fb56f; --warn:#d9a83a; --smoke:#6a6f76; color-scheme:dark }
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);margin:0;font-size:15px;line-height:1.4}

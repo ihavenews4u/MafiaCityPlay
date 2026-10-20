@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MafiaCity — карта</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+html,body{height:100%}
+body{display:flex;flex-direction:column;padding:0;max-width:none;overflow:hidden}
+header{padding:10px max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:20px;flex:1 1 auto}
+#map{flex:1 1 auto;min-height:200px;z-index:0}
+.sheet{background:var(--panel);border-top:1px solid var(--line);padding:10px max(16px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.sheet .status{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:6px}
+.bots{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.bcard{flex:0 0 190px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--bg)}
+.bcard .n{font-family:var(--display);text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--enemy)}
+.bcard .m{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.bcard .btn{padding:8px;margin-top:6px;font-size:13px}
+.bcard.far .btn{display:none}
+.bcard.done{opacity:.5}
+.chip{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:transparent;cursor:pointer}
+.chip.on{border-color:var(--accent);color:var(--accent)}
+select{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:6px;padding:6px 8px}
+.me-marker{width:18px;height:18px;border-radius:50%;background:var(--accent);border:3px solid #fff;box-shadow:0 0 0 2px var(--accent)}
+.bot-marker{width:14px;height:14px;border-radius:50%;background:var(--enemy);border:2px solid #fff;box-shadow:0 0 0 1px var(--enemy)}
+.bot-marker.done{background:var(--smoke);box-shadow:0 0 0 1px var(--smoke)}
+.leaflet-container{font-family:var(--body)}
+</style>
+</head>
+<body>
+<header>
+  <h1>MafiaCity</h1>
+  <label class="chip">Оружие: <select id="myW"></select></label>
+  <button class="chip" id="simBtn" type="button">Тест: ставить себя касанием</button>
+</header>
+<div id="map"></div>
+<div class="sheet">
+  <div class="status" id="status">Определяю, где вы…</div>
+  <div class="bots" id="bots"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="bots.js"></script>
+<script>
+const WEAPON_NAMES = {pistols:"Пара пистолетов", shotgun:"Дробовик", auto:"Автомат", mg:"Пулемёт", sniper:"Снайперская винтовка"};
+const PLACE_NAMES = {mall:"ТЦ, 100 м", street:"улица, 300 м", square:"площадь, 500 м"};
+const RADIUS = 150; // м — в каком радиусе можно вызвать на бой
+const $ = id => document.getElementById(id);
+let my = {lat:null, lng:null}, sim=false, meMarker=null, botMarkers={};
+let myW = "pistols"; try{ myW = localStorage.getItem("mc_weapon")||"pistols"; }catch(e){}
+let results = {}; try{ results = JSON.parse(localStorage.getItem("mc_results")||"{}"); }catch(e){}
+
+for (const [k,v] of Object.entries(WEAPON_NAMES)){ const o=document.createElement("option"); o.value=k; o.textContent=v; if(k===myW) o.selected=true; $("myW").appendChild(o); }
+$("myW").onchange = e => { myW=e.target.value; try{ localStorage.setItem("mc_weapon", myW);}catch(e){} };
+
+const map = L.map("map", {zoomControl:false}).setView([43.1212, 131.9175], 16);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"© OpenStreetMap"}).addTo(map);
+L.control.zoom({position:"bottomright"}).addTo(map);
+
+function dist(a,b){ const R=6371000, toR=x=>x*Math.PI/180; const dLat=toR(b.lat-a.lat), dLng=toR(b.lng-a.lng); const s=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(s)); }
+
+for (const b of BOTS){
+  const done = results[b.id] && (Date.now()-results[b.id].t < 10*60*1000);
+  const icon = L.divIcon({className:"", html:`<div class="bot-marker${done?" done":""}"></div>`, iconSize:[14,14], iconAnchor:[7,7]});
+  botMarkers[b.id] = L.marker([b.lat,b.lng],{icon}).addTo(map).bindPopup(`<b>${b.name}</b><br>${WEAPON_NAMES[b.w]}, уровень ${b.lvl}<br>${PLACE_NAMES[b.place]}`);
+}
+
+function setMe(lat,lng){
+  my={lat,lng};
+  if(!meMarker){ meMarker=L.marker([lat,lng],{icon:L.divIcon({className:"",html:'<div class="me-marker"></div>',iconSize:[18,18],iconAnchor:[9,9]}), zIndexOffset:1000}).addTo(map); map.setView([lat,lng],17); }
+  else meMarker.setLatLng([lat,lng]);
+  renderBots();
+}
+function renderBots(){
+  const list = BOTS.map(b=>({...b, d: my.lat==null? null : Math.round(dist(my,b))})).sort((a,b)=>(a.d??1e9)-(b.d??1e9));
+  const near = list.filter(b=>b.d!=null && b.d<=RADIUS).length;
+  $("status").textContent = my.lat==null ? "Положение не определено — включите геолокацию или тестовый режим." : `Вы: ${my.lat.toFixed(5)}, ${my.lng.toFixed(5)} · рядом (до ${RADIUS} м): ${near}`;
+  $("bots").innerHTML = list.map(b=>{
+    const r = results[b.id], done = r && (Date.now()-r.t < 10*60*1000);
+    const far = b.d==null || b.d>RADIUS;
+    return `<div class="bcard${far?" far":""}${done?" done":""}">
+      <div class="n">${b.name}</div>
+      <div class="m">${WEAPON_NAMES[b.w]} · ур. ${b.lvl}</div>
+      <div class="m">${PLACE_NAMES[b.place]}</div>
+      <div class="m">${b.d==null?"—":b.d+" м"}${done?" · "+(r.win?"побеждён":"победил вас"):""}</div>
+      <a class="btn" href="duel.html?bot=${b.id}&b=${b.w}&p=${b.place}&w=${myW}&name=${encodeURIComponent(b.name)}">${done?"Реванш":"Вызвать на бой"}</a>
+    </div>`;
+  }).join("");
+}
+renderBots();
+
+// геолокация
+if (navigator.geolocation){
+  navigator.geolocation.watchPosition(p=>{ if(!sim) setMe(p.coords.latitude, p.coords.longitude); },
+    err=>{ $("status").textContent = "Геолокация недоступна: "+(err.code===1?"нет разрешения":"ошибка")+". Включите тестовый режим."; },
+    {enableHighAccuracy:true, maximumAge:5000, timeout:15000});
+} else $("status").textContent = "Браузер не даёт геолокацию. Включите тестовый режим.";
+
+// тестовый режим: ставим себя касанием
+$("simBtn").onclick = ()=>{ sim=!sim; $("simBtn").classList.toggle("on",sim); if(sim) $("status").textContent="Тестовый режим: коснитесь карты, чтобы поставить себя."; else renderBots(); };
+map.on("click", e=>{ if(sim) setMe(e.latlng.lat, e.latlng.lng); });
+</script>
+</body>
+</html>
