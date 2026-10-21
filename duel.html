@@ -77,7 +77,7 @@ label.field{display:block;margin-bottom:10px}
 <body>
 <a class="back" href="index.html">← К карте</a>
 <h1 id="title">MafiaCity · Дуэль</h1>
-<p class="sub" id="subtitle">Прототип боя 1 на 1 против бота. Правила боя — черновик 1.</p>
+<p class="sub" id="subtitle">Прототип боя 1 на 1 против бота. Правила боя — черновик 1. <span id="ver" style="font-family:var(--mono)">v7 · 3D</span></p>
 
 <section class="card" id="setup">
   <h2>Ваше оружие</h2>
@@ -341,7 +341,12 @@ function start(){
   $("hand2").hidden = !S.me.w.pair; $("h1").textContent = S.me.w.pair ? "Левая рука" : "Куда стрелять";
   logT(`${PLACES[sel.p].name}, старт ${S.dist} м`);
   resetChoice();
-  if (window.Scene3D && !window.__scene3dReady){ try { window.__scene3dReady = Scene3D.init($("view3d")); } catch(e){ window.__scene3dErr = e.message+" @ "+(e.stack||"").split("\n")[1]; $("view3d").hidden = true; } }
+  if (!window.__scene3dReady){
+    const v = $("view3d");
+    if (!window.THREE){ v.innerHTML = '<p class="hint" style="padding:10px">3D-сцена не загрузилась: нет связи с библиотекой Three.js (блокировка сети или старый браузер).</p>'; }
+    else if (!window.Scene3D){ v.innerHTML = '<p class="hint" style="padding:10px">3D-сцена не инициализировалась (Scene3D).</p>'; }
+    else { try { window.__scene3dReady = Scene3D.init(v); } catch(e){ v.innerHTML = '<p class="hint" style="padding:10px">3D не запустилось: '+e.message+'</p>'; } }
+  }
   render();
 }
 $("start").onclick = start;
@@ -373,7 +378,7 @@ function render(){
   $("smoke").classList.toggle("on", choice.smoke); $("smoke").disabled = !me.smokeLeft;
   $("turn").hidden = S.over;
   drawScheme();
-  if (window.Scene3D) Scene3D.update({dist:S.dist, maxD:PLACES[sel.p].d, place:sel.p, me:{w:sel.w, lane:S.lastMe||"C", smoke:S.me.smokeTurns, hp:S.me.hp}, bot:{w:sel.b, lane:S.lastBot||"C", smoke:S.bot.smokeTurns, hp:S.bot.hp}});
+  if (window.__scene3dReady) Scene3D.update({dist:S.dist, maxD:PLACES[sel.p].d, place:sel.p, me:{w:sel.w, lane:S.lastMe||"C", smoke:S.me.smokeTurns, hp:S.me.hp}, bot:{w:sel.b, lane:S.lastBot||"C", smoke:S.bot.smokeTurns, hp:S.bot.hp}});
 }
 function drawScheme(){
   const W=520, H=150, L=24, R=W-24, top=40, bot=120;
@@ -480,7 +485,7 @@ $("go").onclick = () => {
   const rBot = (bp.shoot.length && canShoot(bot,S.dist)) ? fire(bot, me, bp, choice.move) : {dmg:0,guessed:false,crits:0,hitBullets:0};
   log(`<span class="me">${lineText("Вы", rMe, myPlan, choice.move, choice.approach, "бот")}</span>`);
   log(`<span class="bot">${lineText("Бот", rBot, bp, bp.move, bp.approach, "вы")}</span>`);
-  if (window.Scene3D){ for (const d of myPlan.shoot) Scene3D.fx({from:"me", lane:d, hit:rMe.dmg>0}); for (const d of bp.shoot) Scene3D.fx({from:"bot", lane:d, hit:rBot.dmg>0}); }
+  if (window.__scene3dReady){ for (const d of myPlan.shoot) Scene3D.fx({from:"me", lane:d, hit:rMe.dmg>0}); for (const d of bp.shoot) Scene3D.fx({from:"bot", lane:d, hit:rBot.dmg>0}); }
   bot.hp -= rMe.dmg; me.hp -= rBot.dmg;
   S.lastMe = choice.move; S.lastBot = bp.move;
   // distance
