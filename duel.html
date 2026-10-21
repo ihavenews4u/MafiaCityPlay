@@ -37,6 +37,8 @@ label.field{display:block;margin-bottom:10px}
 .tag{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
 .tag.smoke{border-color:var(--smoke);color:var(--smoke)}
 .tag.ok{border-color:var(--good);color:var(--good)} .tag.no{border-color:var(--warn);color:var(--warn)}
+.view3d{margin-top:12px;border-radius:8px;overflow:hidden;background:var(--line)}
+.view3d canvas{display:block}
 /* scheme */
 .scheme{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
 .scheme svg{width:100%;height:auto;display:block}
@@ -95,6 +97,7 @@ label.field{display:block;margin-bottom:10px}
     <div class="dist"><span id="dist">—</span><small>метров</small></div>
     <div class="fighter bot" style="text-align:right"><div class="name">Бот</div><div class="w" id="botW"></div><div class="hp"><i id="botHp"></i></div><div class="hpn" id="botHpN"></div><div class="tags" id="botTags" style="justify-content:flex-end"></div></div>
   </div>
+  <div class="view3d" id="view3d"></div>
   <div class="scheme" id="scheme"></div>
 </section>
 
@@ -135,6 +138,159 @@ label.field{display:block;margin-bottom:10px}
   <div class="log" id="log"></div>
 </section>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+</body>
+</html>
+<script>
+// MafiaCity — 3D-сцена боя (лоу-поли, Three.js). Подключается к duel.html.
+// Вызовы: Scene3D.init(container), Scene3D.update(state), Scene3D.fx(event)
+// state: {dist, maxD, place, me:{w, lane, smoke, hp}, bot:{w, lane, smoke, hp}}
+window.Scene3D = (() => {
+  let renderer, scene, camera, root, env, figs = {}, smokes = {}, tracers = [], ready = false, cur = null;
+  const LANE_X = {L:-2.2, C:0, R:2.2};
+  const C = {
+    skin:0xd9b48f, pants:0x2d3140, boot:0x1a1a1a, metal:0x3a3d44, wood:0x6b4a2b,
+    me:0xb23a1e, bot:0x2d5f8a, camo:0x5b6b3a, armor:0x2b2b2b, smoke:0x8a8a8a,
+  };
+  const mat = (c, extra={}) => new THREE.MeshLambertMaterial({color:c, ...extra});
+  const box = (w,h,d,c,x=0,y=0,z=0) => { const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat(c)); m.position.set(x,y,z); m.castShadow=true; return m; };
+  const cyl = (r,h,c,x=0,y=0,z=0) => { const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,10), mat(c)); m.position.set(x,y,z); m.castShadow=true; return m; };
+
+  // ---------- фигура бойца ----------
+  function figure(side, wkey, gear){
+    const g = new THREE.Group();
+    const teamC = side==="me" ? C.me : C.bot;
+    const bodyC = gear.camo ? C.camo : teamC;
+    const legs = box(0.5,0.9,0.3,C.pants,0,0.45,0); g.add(legs);
+    g.add(box(0.55,0.15,0.35,C.boot,0,0.07,0));
+    const torso = box(0.7,0.9,0.4,bodyC,0,1.35,0); g.add(torso);
+    if (gear.armor) g.add(box(0.74,0.6,0.46,C.armor,0,1.4,0));
+    const head = box(0.4,0.4,0.4,C.skin,0,2.0,0); g.add(head);
+    const cap = box(0.44,0.12,0.44, gear.camo?C.camo:teamC, 0,2.24,0); g.add(cap);
+    if (gear.thermal){ const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07,8,8), new THREE.MeshBasicMaterial({color:0x7cf27c})); eye.position.set(0.14,2.05,0.22); g.add(eye); }
+    // руки + оружие (направлены к противнику: +z для me, -z для bot — поворачиваем группу)
+    const arms = new THREE.Group(); arms.position.set(0,1.5,0);
+    const armL = box(0.18,0.18,0.9,bodyC,-0.3,0,0.4), armR = box(0.18,0.18,0.9,bodyC,0.3,0,0.4);
+    arms.add(armL, armR);
+    const wp = weapon(wkey); wp.position.set(0.1,0.05,0.6); arms.add(wp);
+    if (wkey==="pistols"){ const wp2 = weapon("pistols"); wp2.position.set(-0.3,0.05,0.6); arms.add(wp2); }
+    g.add(arms);
+    g.userData = {arms, torso, legs};
+    return g;
+  }
+  function weapon(k){
+    const g = new THREE.Group();
+    switch(k){
+      case "sniper": g.add(cyl(0.05,2.2,C.metal,0,0,0.6)); g.add(box(0.1,0.18,0.6,C.wood,0,-0.1,-0.3)); g.add(cyl(0.07,0.5,C.metal,0,0.15,0.2)); break; // длинный ствол + прицел
+      case "auto":   g.add(cyl(0.05,1.3,C.metal,0,0,0.3)); g.add(box(0.1,0.18,0.5,C.wood,0,-0.1,-0.3)); g.add(box(0.08,0.35,0.12,C.metal,0,-0.25,0.1)); break; // магазин
+      case "mg":     g.add(cyl(0.07,1.5,C.metal,0,0,0.3)); g.add(box(0.14,0.22,0.5,C.metal,0,-0.1,-0.3)); g.add(box(0.3,0.25,0.3,C.metal,0,-0.2,0)); g.add(cyl(0.02,0.4,C.metal,0.1,-0.3,0.6)); g.add(cyl(0.02,0.4,C.metal,-0.1,-0.3,0.6)); break; // короб + сошки
+      case "shotgun":g.add(cyl(0.07,0.9,C.metal,0,0,0.2)); g.add(cyl(0.07,0.9,C.metal,0,-0.1,0.2)); g.add(box(0.12,0.2,0.5,C.wood,0,-0.1,-0.35)); break; // два ствола
+      case "pistols":g.add(box(0.08,0.1,0.35,C.metal,0,0,0.1)); g.add(box(0.07,0.25,0.1,C.metal,0,-0.15,-0.05)); break;
+      default: g.add(cyl(0.05,1.0,C.metal,0,0,0.3));
+    }
+    for (const m of g.children){ m.rotation.x = m.geometry.type==="CylinderGeometry" ? Math.PI/2 : 0; }
+    return g;
+  }
+
+  // ---------- окружение ----------
+  function environment(place, maxD){
+    const g = new THREE.Group();
+    const len = maxD/10 + 8; // 10 м = 1 ед.
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(14, len+6), mat(place==="mall"?0xd9d4c7: place==="square"?0x9aa39c:0x4a4d52));
+    ground.rotation.x = -Math.PI/2; ground.position.z = len/2 - 2; ground.receiveShadow = true; g.add(ground);
+    // дорожки
+    for (const x of Object.values(LANE_X)){ const l = new THREE.Mesh(new THREE.PlaneGeometry(0.06, len+4), new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:.25})); l.rotation.x=-Math.PI/2; l.position.set(x,0.01,len/2-2); g.add(l); }
+    if (place==="mall"){
+      // стены, витрины, колонны
+      for (const sx of [-6.5,6.5]){ g.add(box(0.3, 4, len+6, 0xcfc6b4, sx, 2, len/2-2)); }
+      for (let z=0; z<len; z+=4){ for (const sx of [-5.6,5.6]){ g.add(box(0.5,3.2,0.5,0xbdb3a0,sx,1.6,z)); const win = box(0.1,1.6,2.2,0x7fb3d5,sx*1.1,1.8,z+2); g.add(win);} }
+      const roof = new THREE.Mesh(new THREE.PlaneGeometry(14,len+6), mat(0xe8e3d8)); roof.rotation.x=Math.PI/2; roof.position.set(0,4,len/2-2); g.add(roof);
+    } else if (place==="square"){
+      // набережная/площадь: вода справа, парапет, фонари, скамейки
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(20, len+10), mat(0x3f6f8f)); water.rotation.x=-Math.PI/2; water.position.set(16,-0.05,len/2-2); g.add(water);
+      g.add(box(0.4,0.9,len+6,0x8f8f8a,6.8,0.45,len/2-2));
+      for (let z=0; z<len; z+=6){ g.add(cyl(0.08,4,0x2a2a2a,-6,2,z)); const lamp=new THREE.Mesh(new THREE.SphereGeometry(0.25,8,8), new THREE.MeshBasicMaterial({color:0xfff2b0})); lamp.position.set(-6,4,z); g.add(lamp); g.add(box(1.4,0.1,0.5,0x6b4a2b,5.5,0.5,z+3)); }
+    } else {
+      // улица: дома по бокам, припаркованные машины, разметка
+      for (let z=0; z<len; z+=7){ for (const sx of [-1,1]){ const h=4+((z*7)%9); const b=box(5,h,6,[0x8c7b6b,0x9a8f84,0x7a6f68][(z/7|0)%3], sx*9, h/2, z+3); g.add(b);
+        for (let wy=1.5; wy<h-0.5; wy+=1.5) for (let wz=-2; wz<=2; wz+=1.5){ const w=box(0.1,0.8,0.8,0xbfe1ff, sx*6.45, wy, z+3+wz); g.add(w);} } }
+      for (let z=2; z<len; z+=9){ g.add(box(1.8,0.6,4.2,[0xc23b3b,0x3b5fc2,0xdddddd][(z/9|0)%3],-4.8,0.5,z)); g.add(box(1.6,0.5,2.0,0x222222,-4.8,0.95,z)); }
+      for (let z=0; z<len; z+=2){ const m = new THREE.Mesh(new THREE.PlaneGeometry(0.12,1), new THREE.MeshBasicMaterial({color:0xe6d35a})); m.rotation.x=-Math.PI/2; m.position.set(3.6,0.02,z); g.add(m); }
+    }
+    return g;
+  }
+
+  function init(container){
+    if (!window.THREE) return false;
+    renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    container.innerHTML = ""; container.appendChild(renderer.domElement);
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(50, 1, 0.1, 300);
+    const amb = new THREE.HemisphereLight(0xffffff, 0x556070, 0.9); scene.add(amb);
+    const sun = new THREE.DirectionalLight(0xfff4e0, 0.9); sun.position.set(5,12,-6); sun.castShadow=true; sun.shadow.mapSize.set(1024,1024);
+    const s = sun.shadow.camera; s.left=-20; s.right=20; s.top=60; s.bottom=-10; scene.add(sun);
+    root = new THREE.Group(); scene.add(root);
+    const ro = new ResizeObserver(resize); ro.observe(container);
+    resize(); ready = true; animate();
+    return true;
+  }
+  function resize(){ const el = renderer.domElement.parentElement; const w = el.clientWidth || el.parentElement.clientWidth || 360, h = Math.max(220, Math.round(w*0.62)); renderer.setSize(w,h,false); renderer.domElement.style.width="100%"; renderer.domElement.style.height=h+"px"; camera.aspect=w/h; camera.updateProjectionMatrix(); }
+
+  function update(st){
+    if (!ready) return;
+    cur = st;
+    const key = st.place+"|"+st.maxD+"|"+st.me.w+"|"+st.bot.w;
+    if (root.userData.key !== key){
+      root.clear(); figs = {}; smokes = {};
+      env = environment(st.place, st.maxD); root.add(env);
+      scene.background = new THREE.Color(st.place==="mall"?0xe9e4da: st.place==="square"?0xbfd6e6:0x9fb0c0);
+      scene.fog = new THREE.Fog(scene.background.getHex(), 30, 90);
+      figs.me = figure("me", st.me.w, st.me.gear||{}); root.add(figs.me);
+      figs.bot = figure("bot", st.bot.w, st.bot.gear||{}); figs.bot.rotation.y = Math.PI; root.add(figs.bot);
+      root.userData.key = key;
+    }
+    figs.me.userData.target = new THREE.Vector3(LANE_X[st.me.lane||"C"], 0, 0);
+    figs.bot.userData.target = new THREE.Vector3(LANE_X[st.bot.lane||"C"], 0, st.dist/10);
+    for (const k of ["me","bot"]){
+      const f = figs[k];
+      const want = st[k].smoke>0;
+      if (want && !smokes[k]){ const sm = new THREE.Group(); for (let i=0;i<7;i++){ const p = new THREE.Mesh(new THREE.SphereGeometry(0.7+Math.random()*0.5,8,8), new THREE.MeshLambertMaterial({color:C.smoke, transparent:true, opacity:.55})); p.position.set((Math.random()-.5)*2.2, 0.6+Math.random()*1.6, (Math.random()-.5)*2.2); sm.add(p);} f.add(sm); smokes[k]=sm; }
+      if (!want && smokes[k]){ f.remove(smokes[k]); delete smokes[k]; }
+      f.visible = st[k].hp > 0;
+    }
+  }
+  function fx(ev){
+    // ev: {from:"me"|"bot", lane:"L"|"C"|"R", hit:boolean}
+    if (!ready || !figs.me) return;
+    const from = figs[ev.from], toZ = ev.from==="me" ? (cur.dist/10) : 0;
+    const a = from.position.clone().add(new THREE.Vector3(0,1.55,0));
+    const b = new THREE.Vector3(LANE_X[ev.lane], 1.4, toZ);
+    const geo = new THREE.BufferGeometry().setFromPoints([a,b]);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({color: ev.hit?0xffd36b:0xffffff, transparent:true, opacity:1}));
+    root.add(line); tracers.push({line, t:0});
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(0.18,8,8), new THREE.MeshBasicMaterial({color:0xfff0a0})); flash.position.copy(a).add(new THREE.Vector3(0,0,ev.from==="me"?1.2:-1.2)); root.add(flash); tracers.push({line:flash, t:0, flash:true});
+  }
+  function animate(){
+    requestAnimationFrame(animate);
+    if (!cur) { renderer.render(scene,camera); return; }
+    for (const k of ["me","bot"]){ const f=figs[k]; if (!f||!f.userData.target) continue; f.position.lerp(f.userData.target, 0.12); }
+    for (let i=tracers.length-1;i>=0;i--){ const t=tracers[i]; t.t+=0.04; const o=Math.max(0,1-t.t); if (t.flash){ t.line.scale.setScalar(1+t.t*3); t.line.material.opacity=o; t.line.material.transparent=true; } else t.line.material.opacity=o; if (t.t>=1){ root.remove(t.line); tracers.splice(i,1); } }
+    // камера: сзади-сверху за игроком, смотрит на середину дистанции
+    const bz = figs.bot ? figs.bot.position.z : 10;
+    const mx = figs.me ? figs.me.position.x : 0;
+    // камера за плечом своего бойца: он всегда крупный, дистанция читается перспективой
+    camera.position.lerp(new THREE.Vector3(mx + 3.2, 2.6, -4.2), 0.08);
+    camera.lookAt(mx*0.3, 1.3, Math.min(bz, 18)*0.5 + 2);
+    renderer.render(scene,camera);
+  }
+  return {init, update, fx};
+})();
+
+</script>
+</body>
+</html>
 <script>
 const WEAPONS = {
   sniper:  {name:"Снайперская винтовка", short:"Снайперка", rng:500, min:100, dmg:70, bullets:1, stray:0},
@@ -184,7 +340,9 @@ function start(){
   $("meW").textContent = S.me.w.name; $("botW").textContent = S.bot.w.name; if (BOT_NAME) document.querySelector(".fighter.bot .name").textContent = BOT_NAME;
   $("hand2").hidden = !S.me.w.pair; $("h1").textContent = S.me.w.pair ? "Левая рука" : "Куда стрелять";
   logT(`${PLACES[sel.p].name}, старт ${S.dist} м`);
-  resetChoice(); render();
+  resetChoice();
+  if (window.Scene3D && !window.__scene3dReady){ try { window.__scene3dReady = Scene3D.init($("view3d")); } catch(e){ window.__scene3dErr = e.message+" @ "+(e.stack||"").split("\n")[1]; $("view3d").hidden = true; } }
+  render();
 }
 $("start").onclick = start;
 if (BOT_ID) start();
@@ -215,6 +373,7 @@ function render(){
   $("smoke").classList.toggle("on", choice.smoke); $("smoke").disabled = !me.smokeLeft;
   $("turn").hidden = S.over;
   drawScheme();
+  if (window.Scene3D) Scene3D.update({dist:S.dist, maxD:PLACES[sel.p].d, place:sel.p, me:{w:sel.w, lane:S.lastMe||"C", smoke:S.me.smokeTurns, hp:S.me.hp}, bot:{w:sel.b, lane:S.lastBot||"C", smoke:S.bot.smokeTurns, hp:S.bot.hp}});
 }
 function drawScheme(){
   const W=520, H=150, L=24, R=W-24, top=40, bot=120;
@@ -321,6 +480,7 @@ $("go").onclick = () => {
   const rBot = (bp.shoot.length && canShoot(bot,S.dist)) ? fire(bot, me, bp, choice.move) : {dmg:0,guessed:false,crits:0,hitBullets:0};
   log(`<span class="me">${lineText("Вы", rMe, myPlan, choice.move, choice.approach, "бот")}</span>`);
   log(`<span class="bot">${lineText("Бот", rBot, bp, bp.move, bp.approach, "вы")}</span>`);
+  if (window.Scene3D){ for (const d of myPlan.shoot) Scene3D.fx({from:"me", lane:d, hit:rMe.dmg>0}); for (const d of bp.shoot) Scene3D.fx({from:"bot", lane:d, hit:rBot.dmg>0}); }
   bot.hp -= rMe.dmg; me.hp -= rBot.dmg;
   S.lastMe = choice.move; S.lastBot = bp.move;
   // distance
