@@ -293,6 +293,8 @@ const materials=new Map(),textures=new Map(),prefabs=new Map();
 return {create(side,key){const id=side+key;if(!prefabs.has(id)){const model=figure(side,{w:key,gear:{thermal:key==='sniper'}});model.rotation.y=0;batchStatic(model);prefabs.set(id,model);}const copy=prefabs.get(id).clone(true);copy.rotation.y=side==='me'?Math.PI:0;return copy;},dispose(){prefabs.forEach(release);materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());prefabs.clear();materials.clear();textures.clear();}};})();
 
 // Linear field projection: 25 game metres = one world unit on both ground axes.
+// Linear field projection: 25 game metres = one world unit on both ground axes.
+// Linear field projection: 25 game metres = one world unit on both ground axes.
 // Host API: Field3D.init(element,{onSelect}), update(state,playerId,targetId),
 // view('overview'|'side'|'close'), blast(unitId,radiusMetres), dispose().
 window.Field3D=(()=>{
@@ -304,7 +306,8 @@ window.Field3D=(()=>{
   const x=lane=>(lane-1)*4;
   function line(points,color,opacity=1){const o=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color,transparent:opacity<1,opacity}));ground.add(o);return o;}
   function plane(w,h,color,opacity=1){const o=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({color,transparent:opacity<1,opacity,side:THREE.DoubleSide,depthWrite:opacity===1}));o.rotation.x=-Math.PI/2;scene.add(o);return o;}
-  function textLabel(text,position,kind=''){const el=document.createElement('span');el.className='map-label '+kind;el.textContent=text;labels.appendChild(el);return {el,position};}
+  const QUIET=true; // минимум подписей: только «Вы» и цель
+  function textLabel(text,position,kind=''){const el=document.createElement('span');el.className='map-label '+kind;el.textContent=text;if(QUIET&&!/unit-label/.test(kind)&&kind!=='')el.style.display='none';labels.appendChild(el);return {el,position};}
   const anchors=[];
   function init(el,opts={}){
     container=el;onSelect=opts.onSelect||(()=>{});scene=new THREE.Scene();scene.background=new THREE.Color(0x27353a);
@@ -323,7 +326,7 @@ window.Field3D=(()=>{
     anchors.push(textLabel('ИХ ТЫЛ · 1000 м',vec(0,.1,-22),'rear bot'),textLabel('НАШ ТЫЛ · 0 м',vec(0,.1,23),'rear me'));
     centerLine=line([vec(-6,.06,0),vec(6,.06,0)],0xffd285);overlay=textLabel('ЦЕНТР · 500 м',vec(7,.1,0),'center-label');anchors.push(overlay);
     range=plane(12,1,0xcfa55c,.16);range.position.y=.045;
-    arrow=new THREE.ArrowHelper(vec(0,0,-1),vec(5.7,.2,10),10,0xffe4a4,.55,.3);scene.add(arrow);measure=textLabel('',vec(5.7,.3,0),'measure-label');anchors.push(measure);
+    arrow=new THREE.ArrowHelper(vec(0,0,-1),vec(5.7,.2,10),10,0xffe4a4,.55,.3);scene.add(arrow);measure=textLabel('',vec(5.7,.3,0),'measure-label');anchors.push(measure);if(QUIET){arrow.visible=false;measure.el.style.display='none';}
     blastMesh=new THREE.Mesh(new THREE.CircleGeometry(1,64),new THREE.MeshBasicMaterial({color:0xeab16b,transparent:true,opacity:.45,side:THREE.DoubleSide,depthWrite:false}));blastMesh.rotation.x=-Math.PI/2;blastMesh.visible=false;scene.add(blastMesh);
     // Architectural edges frame the board without blocking the ranks.
     for(let i=0;i<8;i++)for(const side of [-1,1]){
@@ -339,9 +342,10 @@ window.Field3D=(()=>{
   function compose(){
     if(!camera)return;const aspect=container.clientWidth/container.clientHeight;
     let span=mode==='side'?Math.max(20,52/aspect):Math.max(48,30/aspect),focus=vec(0,0,0);
-    if(mode==='close'&&state){const u=state.units.find(u=>u.id===playerId);if(u)focus=vec(x(u.lane),.5,z(u.m));span=Math.max(7,7/aspect);}
+    if(mode==='close'&&state){const u=state.units.find(u=>u.id===playerId);if(u)focus=vec(x(u.lane),.5,z(u.m));span=Math.max(14,14/aspect);}
+    if(mode==='side'&&state&&QUIET){const u=state.units.find(u=>u.id===playerId),t=state.units.find(u=>u.id===targetId);if(u&&t){focus=vec(0,.3,(z(u.m)+z(t.m))/2);span=Math.max(10,Math.abs(z(u.m)-z(t.m))*1.25+8);}}
     camera.left=-span*aspect/2;camera.right=span*aspect/2;camera.top=span/2;camera.bottom=-span/2;
-    camera.position.copy(focus).add(mode==='side'?vec(38,24,6):mode==='close'?vec(8,8,10):vec(3,38,19));camera.lookAt(focus);camera.updateProjectionMatrix();draw();
+    camera.position.copy(focus).add(mode==='side'?vec(38,24,6):mode==='close'?vec(14,13,18):vec(3,38,19));camera.lookAt(focus);camera.updateProjectionMatrix();draw();
   }
   function make(u){
     const model=FieldModels.create(u.team,u.weapon);model.scale.setScalar(.64);scene.add(model);
@@ -355,7 +359,7 @@ window.Field3D=(()=>{
     for(const u of s.units){if(!units.has(u.id))units.set(u.id,make(u));const o=units.get(u.id),xx=x(u.lane),zz=z(u.m),threat=u.team!==player.team&&FieldRules.reach(u,player);
       o.model.position.set(xx,0,zz);o.model.visible=u.hp>0;o.ring.position.set(xx,.08,zz);o.ring.visible=u.hp>0;o.ring.material.color.set(u.id===target?0xffe2a0:u.id===me?0xffffff:threat?0xea754c:colors[u.team]);o.ring.scale.setScalar(u.id===target||u.id===me?1.35:1);
       o.hit.position.set(xx,.8,zz);o.hit.visible=u.hp>0;o.smoke.position.set(xx,.6,zz);o.smoke.visible=u.smoke>.001;o.smoke.material.opacity=Math.min(.7,u.smoke*.7);
-      o.label.position.set(xx,1.65,zz);o.label.el.textContent=(u.id===me?'Вы':u.id===target?'Цель · '+u.name:threat?'Угроза · '+u.name:'')+(u.hp<100?' · '+u.hp+' HP':'');o.label.el.className='map-label unit-label '+(u.id===target?'selected':'');o.label.el.hidden=!o.label.el.textContent||u.hp<=0;
+      o.label.position.set(xx,1.65,zz);o.label.el.textContent=QUIET?(u.id===me?'Вы':u.id===target?u.name:''):(u.id===me?'Вы':u.id===target?'Цель · '+u.name:threat?'Угроза · '+u.name:'')+(u.hp<100?' · '+u.hp+' HP':'');o.label.el.className='map-label unit-label '+(u.id===target?'selected':'');o.label.el.hidden=!o.label.el.textContent||u.hp<=0;
     }
     const c=FieldRules.center(s);centerLine.position.z=z(c);overlay.position.z=z(c);overlay.el.textContent='ЦЕНТР · '+Math.round(c)+' м';
     const low=Math.max(0,player.m-player.range),high=Math.min(s.depth,player.m+player.range);range.scale.y=(high-low)/S;range.position.z=z((low+high)/2);
