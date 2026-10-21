@@ -40,18 +40,6 @@ label.field{display:block;margin-bottom:10px}
 .scene-heading{display:flex;justify-content:space-between;gap:12px;margin-top:10px;color:var(--muted);font-size:12px}
 .view3d{margin-top:6px;border-radius:8px;overflow:hidden;background:var(--line)}
 .view3d canvas{display:block}
-/* scheme */
-.scheme{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
-.scheme svg{width:100%;height:auto;display:block}
-.scheme .lbl{font-family:var(--mono);font-size:11px;fill:var(--muted)}
-.scheme .nm{font-family:var(--display);font-size:13px;letter-spacing:.04em;text-transform:uppercase}
-.scheme .axis{stroke:var(--line);stroke-width:1}
-.scheme .lane{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
-.scheme .rme{fill:var(--accent);opacity:.14} .scheme .rbot{fill:var(--enemy);opacity:.14}
-.scheme .dead{fill:var(--bg);opacity:.9}
-.scheme .pme{fill:var(--accent)} .scheme .pbot{fill:var(--enemy)}
-.scheme .sm{fill:var(--smoke);opacity:.45}
-.scheme .steps{font-family:var(--mono);font-size:12px;fill:var(--fg)}
 /* turn controls */
 .turnHead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px}
 .turnHead h2{margin:0}
@@ -103,7 +91,7 @@ label.field{display:block;margin-bottom:10px}
 <body>
 <a class="back" href="index.html">← К карте</a>
 <h1 id="title">MafiaCity · Дуэль</h1>
-<p class="sub" id="subtitle">Прототип боя 1 на 1 против бота. Правила боя — черновик 1. <span id="ver" style="font-family:var(--mono)">v9</span></p>
+<p class="sub" id="subtitle">Прототип боя 1 на 1 против бота. Правила боя — черновик 1. <span id="ver" style="font-family:var(--mono)">v10</span></p>
 
 <section class="card" id="setup">
   <h2>Ваше оружие</h2>
@@ -125,7 +113,6 @@ label.field{display:block;margin-bottom:10px}
   </div>
   <div class="scene-heading"><span id="scenePlace"></span><span>Владивосток</span></div>
   <div class="view3d" id="view3d"></div>
-  <div class="scheme" id="scheme"></div>
 </section>
 
 <section class="card" id="turn" hidden>
@@ -263,7 +250,7 @@ window.Scene3D = (() => {
   let overlay,rangeLayer,hudKey='',viewWidth=1,viewHeight=1;
   function initOverlay(container){
     overlay=document.createElement('div');overlay.className='scene-overlay';
-    overlay.innerHTML='<div class="scene-distance"><strong></strong><span>между бойцами</span></div><div class="scene-unit unit-me">ВЫ</div><div class="scene-unit unit-bot">ПРОТИВНИК</div><svg class="scene-measure" aria-hidden="true"><path/></svg><div class="scene-ranges" aria-live="polite"><div class="range-me"><b>ВЫ</b><strong></strong><span></span></div><div class="range-bot"><b>ПРОТИВНИК</b><strong></strong><span></span></div></div><div class="scene-scale">Боковой вид · масштаб расстояний сжат</div>';
+    overlay.innerHTML='<div class="scene-distance"><strong></strong><span>между бойцами</span></div><div class="scene-unit unit-me">ВЫ</div><div class="scene-unit unit-bot">ПРОТИВНИК</div><svg class="scene-measure" aria-hidden="true"><path/></svg><div class="scene-ranges" aria-live="polite"><div class="range-me"><b>ВЫ</b><strong></strong><span></span></div><div class="range-bot"><b>ПРОТИВНИК</b><strong></strong><span></span></div></div>';
     container.appendChild(overlay);
     const full=document.createElement('button');full.className='scene-fullscreen';full.type='button';full.textContent='На весь экран';full.onclick=async()=>{try{if(document.fullscreenElement===container)await document.exitFullscreen();else await container.requestFullscreen();}catch{full.textContent='Полный экран недоступен';}};container.appendChild(full);
   }
@@ -454,33 +441,7 @@ function render(){
   $("approach").checked = choice.approach; $("approach").disabled = S.dist<=0;
   $("smoke").checked = choice.smoke; $("smoke").disabled = !me.smokeLeft && !choice.smoke;
   $("turn").hidden = S.over;
-  drawScheme();
   if (window.__scene3dReady) Scene3D.update({dist:S.dist, maxD:PLACES[sel.p].d, place:sel.p, me:{w:sel.w, lane:S.lastMe||"C", smoke:S.me.smokeTurns, hp:S.me.hp, rng:S.me.w.rng, min:S.me.w.min}, bot:{w:sel.b, lane:S.lastBot||"C", smoke:S.bot.smokeTurns, hp:S.bot.hp, rng:S.bot.w.rng, min:S.bot.w.min}});
-}
-function drawScheme(){
-  const W=520, H=150, L=24, R=W-24, top=40, bot=120;
-  const maxD = Math.max(PLACES[sel.p].d, 100), px = m => L + (R-L)*m/maxD;
-  const me=S.me, bo=S.bot, d=S.dist;
-  const laneY = {L:top+14, C:(top+bot)/2, R:bot-14};
-  const myY = laneY[S.lastMe||"C"], botY = laneY[S.lastBot||"C"];
-  const meRange = `<rect class="rme" x="${px(0)}" y="${top}" width="${px(Math.min(me.w.rng,maxD))-px(0)}" height="${bot-top}" rx="4"/>` +
-    (me.w.min ? `<rect class="dead" x="${px(0)}" y="${top}" width="${px(me.w.min)-px(0)}" height="${bot-top}"/><text class="lbl" x="${px(me.w.min)-2}" y="${top-6}" text-anchor="end">мёртвая зона ${me.w.min} м</text>` : "");
-  const botRange = `<rect class="rbot" x="${px(Math.max(0,d-bo.w.rng))}" y="${top}" width="${px(d)-px(Math.max(0,d-bo.w.rng))}" height="${bot-top}" rx="4"/>`;
-  const meHits = canShoot(me,d), botHits = canShoot(bo,d);
-  const stepsBot = d>bo.w.rng ? Math.ceil((d-bo.w.rng)/STEP) : 0, stepsMe = d>me.w.rng ? Math.ceil((d-me.w.rng)/STEP) : 0;
-  const ticks = [0,100,200,300,400,500].filter(t=>t<=maxD).map(t=>`<line class="axis" x1="${px(t)}" y1="${bot}" x2="${px(t)}" y2="${bot+5}"/><text class="lbl" x="${px(t)}" y="${bot+17}" text-anchor="middle">${t}</text>`).join("");
-  const smokeMe = me.smokeTurns>0 ? `<circle class="sm" cx="${px(0)}" cy="${myY}" r="22"/>` : "";
-  const smokeBot = bo.smokeTurns>0 ? `<circle class="sm" cx="${px(d)}" cy="${botY}" r="22"/>` : "";
-  const lanes = ["L","C","R"].map(k=>`<line class="lane" x1="${L}" y1="${laneY[k]}" x2="${R}" y2="${laneY[k]}"/>`).join("");
-  const laneLbl = `<text class="lbl" x="${R+2}" y="${laneY.L+4}" text-anchor="start">л</text><text class="lbl" x="${R+2}" y="${laneY.C+4}" text-anchor="start">ц</text><text class="lbl" x="${R+2}" y="${laneY.R+4}" text-anchor="start">п</text>`;
-  const info = `<text class="steps" x="${(px(0)+px(d))/2}" y="${top-8}" text-anchor="middle">${d} м · ${botHits?"бот достаёт":"боту идти "+stepsBot+" х."} · ${meHits?"вы достаёте":"вам идти "+stepsMe+" х."}</text>`;
-  $("scheme").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Схема боя: дистанция ${d} м">
-    ${meRange}${botRange}${lanes}<line class="axis" x1="${L}" y1="${bot}" x2="${R}" y2="${bot}"/>${ticks}${laneLbl}
-    ${smokeMe}${smokeBot}
-    <circle class="pme" cx="${px(0)}" cy="${myY}" r="8"/><text class="nm pme" x="${px(0)}" y="${bot+32}" text-anchor="middle">Вы</text>
-    <circle class="pbot" cx="${px(d)}" cy="${botY}" r="8"/><text class="nm pbot" x="${px(d)}" y="${bot+32}" text-anchor="middle">Бот</text>
-    ${info}</svg>
-  <p class="hint">Светлая полоса слева — куда достаёте вы, справа — куда достаёт бот. Дорожки: лево / центр / право, кружок стоит там, куда боец сдвинулся на прошлом ходу.</p>`;
 }
 document.querySelectorAll(".shoot").forEach(b=>b.onclick=()=>{
   const h=b.dataset.hand, d=b.dataset.d;
